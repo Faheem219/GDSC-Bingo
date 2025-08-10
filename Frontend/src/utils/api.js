@@ -1,5 +1,5 @@
 // API base URL - configure according to your backend
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001/api'
+const API_BASE_URL = import.meta.env.REACT_APP_API_URL || 'http://localhost:3001/api'
 
 // Fallback tasks for development when API fails
 const FALLBACK_TASKS = [
