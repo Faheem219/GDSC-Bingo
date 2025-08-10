@@ -1,12 +1,14 @@
 import { useState } from 'react'
 import TopBar from './TopBar'
 import gdscLogo from '../assets/gdsc.png'
+import { api, utils } from '../utils/api'
 
 const WelcomeScreen = ({ onRegister }) => {
     const [formData, setFormData] = useState({
         name: '',
         mobile: ''
     })
+    const [loading, setLoading] = useState(false)
 
     const COLORS = {
         darkNavy: '#0B083F',
@@ -17,13 +19,36 @@ const WelcomeScreen = ({ onRegister }) => {
     const handleSubmit = async (e) => {
         e.preventDefault()
         if (formData.name && formData.mobile) {
-            // Here you would make an API call to POST /api/auth/register
-            const playerData = {
-                ...formData,
-                id: `GDSC${Math.random().toString(36).substr(2, 6).toUpperCase()}`,
-                tag: `${formData.name.split(' ')[0]}-${Math.random().toString(36).substr(2, 4)}`
+            setLoading(true)
+            try {
+                // Validate inputs
+                if (!utils.validatePlayerName(formData.name)) {
+                    alert('Name must be between 2-50 characters')
+                    return
+                }
+                if (!utils.validateMobileNumber(formData.mobile)) {
+                    alert('Please enter a valid mobile number')
+                    return
+                }
+
+                // Create player data
+                const playerData = {
+                    ...formData,
+                    id: utils.generatePlayerId(),
+                    tag: utils.generatePlayerTag(formData.name)
+                }
+
+                // Register player via API
+                const result = await api.registerPlayer(playerData)
+                console.log('Player registered:', result)
+
+                onRegister(playerData)
+            } catch (error) {
+                console.error('Registration failed:', error)
+                alert('Registration failed. Please try again.')
+            } finally {
+                setLoading(false)
             }
-            onRegister(playerData)
         }
     }
 
@@ -81,9 +106,10 @@ const WelcomeScreen = ({ onRegister }) => {
                     />
                     <button
                         type="submit"
-                        className="w-full bg-blue-500 hover:bg-blue-600 text-white py-4 rounded-xl font-semibold transition-colors"
+                        disabled={loading || !formData.name.trim() || !formData.mobile.trim()}
+                        className="w-full bg-blue-500 hover:bg-blue-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-white py-4 rounded-xl font-semibold transition-colors"
                     >
-                        Start Playing
+                        {loading ? 'Registering...' : 'Start Playing'}
                     </button>
                 </form>
             </div>

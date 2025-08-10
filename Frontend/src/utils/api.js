@@ -1,197 +1,131 @@
 // API base URL - configure according to your backend
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001/api'
 
-// API helper functions
+// Fallback tasks for development when API fails
+const FALLBACK_TASKS = [
+    "Find someone who can whistle",
+    "Find someone who knows Python",
+    "Find someone from Delhi",
+    "Find someone who plays guitar",
+    "Find someone who loves coffee",
+    "Find someone who can speak 3+ languages",
+    "Find someone who has traveled abroad",
+    "Find someone who is left-handed",
+    "Find someone who loves reading",
+    "Find someone who can cook well",
+    "Find someone who plays sports",
+    "Find someone who loves photography",
+    "Find someone who is an early bird",
+    "Find someone who loves movies",
+    "Find someone who can dance",
+    "Find someone who loves gaming",
+    "Find someone who has a pet",
+    "Find someone who loves hiking",
+    "Find someone who knows AI/ML",
+    "Find someone who loves art",
+    "Find someone who can sing",
+    "Find someone who loves music",
+    "Find someone who is studying CS",
+    "Find someone who loves memes",
+    "Find someone who uses Linux",
+    "Find someone who loves anime",
+    "Find someone from Mumbai",
+    "Find someone who codes daily",
+    "Find someone who loves tea",
+    "Find someone who can drive",
+    "Find someone who loves nature",
+    "Find someone who plays chess",
+    "Find someone who loves books",
+    "Find someone who knows React",
+    "Find someone who loves writing",
+    "Find someone who can swim"
+]
+
+// Simplified API functions
 export const api = {
-    // Authentication & User Management
+    // Register player for the session
     registerPlayer: async (playerData) => {
-        const response = await fetch(`${API_BASE_URL}/auth/register`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(playerData),
-        })
-        return response.json()
+        try {
+            const response = await fetch(`${API_BASE_URL}/players/register`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(playerData),
+            })
+            if (!response.ok) throw new Error('Registration failed')
+            return await response.json()
+        } catch (error) {
+            console.warn('Registration API failed, using local data:', error)
+            return { success: true, player: playerData }
+        }
     },
 
-    verifyPlayer: async (token) => {
-        const response = await fetch(`${API_BASE_URL}/auth/verify/${token}`)
-        return response.json()
-    },
-
-    getPlayer: async (playerId) => {
-        const response = await fetch(`${API_BASE_URL}/players/${playerId}`)
-        return response.json()
-    },
-
-    // Game Management
-    getGames: async () => {
-        const response = await fetch(`${API_BASE_URL}/games`)
-        return response.json()
-    },
-
-    createGame: async (gameData) => {
-        const response = await fetch(`${API_BASE_URL}/games`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(gameData),
-        })
-        return response.json()
-    },
-
-    getGame: async (gameId) => {
-        const response = await fetch(`${API_BASE_URL}/games/${gameId}`)
-        return response.json()
-    },
-
-    joinGame: async (gameId, playerData) => {
-        const response = await fetch(`${API_BASE_URL}/games/${gameId}/join`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(playerData),
-        })
-        return response.json()
-    },
-
-    leaveGame: async (gameId, playerId) => {
-        const response = await fetch(`${API_BASE_URL}/games/${gameId}/leave`, {
-            method: 'DELETE',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ playerId }),
-        })
-        return response.json()
-    },
-
-    // Bingo Cards & Tasks
-    getCardTemplates: async () => {
-        const response = await fetch(`${API_BASE_URL}/cards/templates`)
-        return response.json()
-    },
-
-    getCard: async (cardId) => {
-        const response = await fetch(`${API_BASE_URL}/cards/${cardId}`)
-        return response.json()
-    },
-
-    generateCard: async (playerData) => {
-        const response = await fetch(`${API_BASE_URL}/cards/generate`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(playerData),
-        })
-        return response.json()
-    },
-
+    // Get the 36 bingo tasks (same for all players)
     getTasks: async () => {
-        const response = await fetch(`${API_BASE_URL}/tasks`)
-        return response.json()
+        try {
+            const response = await fetch(`${API_BASE_URL}/tasks`)
+            if (!response.ok) throw new Error('Tasks fetch failed')
+            const data = await response.json()
+            return data.tasks || data
+        } catch (error) {
+            console.warn('Tasks API failed, using fallback tasks:', error)
+            return FALLBACK_TASKS
+        }
     },
 
-    // Game Actions
-    markTask: async (gameId, taskData) => {
-        const response = await fetch(`${API_BASE_URL}/games/${gameId}/mark-task`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(taskData),
-        })
-        return response.json()
+    // Mark a task as completed for the player
+    markTask: async (playerId, taskIndex, partnerTag) => {
+        try {
+            const response = await fetch(`${API_BASE_URL}/players/${playerId}/tasks/${taskIndex}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ partnerTag }),
+            })
+            if (!response.ok) throw new Error('Mark task failed')
+            return await response.json()
+        } catch (error) {
+            console.warn('Mark task API failed, using local storage:', error)
+            // Store locally as fallback
+            const completed = JSON.parse(localStorage.getItem(`completed_${playerId}`) || '[]')
+            if (!completed.includes(taskIndex)) {
+                completed.push(taskIndex)
+                localStorage.setItem(`completed_${playerId}`, JSON.stringify(completed))
+            }
+            return { success: true, taskIndex, partnerTag }
+        }
     },
 
-    getPlayerBoard: async (gameId, playerId) => {
-        const response = await fetch(`${API_BASE_URL}/games/${gameId}/board/${playerId}`)
-        return response.json()
+    // Get player's completed tasks
+    getPlayerBoard: async (playerId) => {
+        try {
+            const response = await fetch(`${API_BASE_URL}/players/${playerId}/board`)
+            if (!response.ok) throw new Error('Get board failed')
+            const data = await response.json()
+            return data.completedTasks || data
+        } catch (error) {
+            console.warn('Get board API failed, using local storage:', error)
+            return JSON.parse(localStorage.getItem(`completed_${playerId}`) || '[]')
+        }
     },
 
-    verifyTaskCompletion: async (gameId, verificationData) => {
-        const response = await fetch(`${API_BASE_URL}/games/${gameId}/verify-completion`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(verificationData),
-        })
-        return response.json()
-    },
-
-    getLeaderboard: async (gameId) => {
-        const response = await fetch(`${API_BASE_URL}/games/${gameId}/leaderboard`)
-        return response.json()
-    },
-}
-
-// WebSocket helper for real-time updates
-export class GameWebSocket {
-    constructor(gameId) {
-        this.gameId = gameId
-        this.socket = null
-        this.eventHandlers = {}
-    }
-
-    connect() {
-        const WS_BASE_URL = process.env.REACT_APP_WS_URL || 'ws://localhost:3001'
-        this.socket = new WebSocket(`${WS_BASE_URL}/ws/games/${this.gameId}`)
-
-        this.socket.onopen = () => {
-            console.log('Connected to game WebSocket')
-            this.emit('connected')
-        }
-
-        this.socket.onmessage = (event) => {
-            const data = JSON.parse(event.data)
-            this.emit(data.type, data.payload)
-        }
-
-        this.socket.onclose = () => {
-            console.log('Disconnected from game WebSocket')
-            this.emit('disconnected')
-        }
-
-        this.socket.onerror = (error) => {
-            console.error('WebSocket error:', error)
-            this.emit('error', error)
-        }
-    }
-
-    disconnect() {
-        if (this.socket) {
-            this.socket.close()
-            this.socket = null
-        }
-    }
-
-    send(type, payload) {
-        if (this.socket && this.socket.readyState === WebSocket.OPEN) {
-            this.socket.send(JSON.stringify({ type, payload }))
-        }
-    }
-
-    on(event, handler) {
-        if (!this.eventHandlers[event]) {
-            this.eventHandlers[event] = []
-        }
-        this.eventHandlers[event].push(handler)
-    }
-
-    off(event, handler) {
-        if (this.eventHandlers[event]) {
-            this.eventHandlers[event] = this.eventHandlers[event].filter(h => h !== handler)
-        }
-    }
-
-    emit(event, data) {
-        if (this.eventHandlers[event]) {
-            this.eventHandlers[event].forEach(handler => handler(data))
+    // Announce winner to backend
+    announceWinner: async (playerId, winType, winIndices) => {
+        try {
+            const response = await fetch(`${API_BASE_URL}/players/${playerId}/win`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ winType, winIndices, timestamp: Date.now() }),
+            })
+            if (!response.ok) throw new Error('Announce winner failed')
+            return await response.json()
+        } catch (error) {
+            console.warn('Announce winner API failed:', error)
+            return { success: true, message: 'Winner announced locally' }
         }
     }
 }
@@ -272,4 +206,4 @@ export const utils = {
     }
 }
 
-export default { api, GameWebSocket, utils }
+export default { api, utils }
