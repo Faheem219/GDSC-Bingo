@@ -1,15 +1,21 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import TopBar from './TopBar'
 import gdscLogo from '../assets/gdsc.png'
-import { api, utils } from '../utils/api'
+import { api, utils, GameWebSocket } from '../utils/api'
 
-const GameBoard = ({ playerData, onWin }) => {
-    const [gameTimer, setGameTimer] = useState(60) // 1 minute in seconds for demo
+const GameBoard = ({ playerData, onWin, onShowLeaderboard }) => {
+    const [gameTimer, setGameTimer] = useState(0) // Forward counting timer from game start
     const [bingoGrid, setBingoGrid] = useState([])
     const [completedTasks, setCompletedTasks] = useState(new Set())
     const [showCardModal, setShowCardModal] = useState(null)
     const [tagInput, setTagInput] = useState('')
     const [loading, setLoading] = useState(true)
+    const [playerScore, setPlayerScore] = useState(0)
+    const [bingos, setBingos] = useState([])
+    const [isGameActive, setIsGameActive] = useState(true)
+    const [realtimeUpdates, setRealtimeUpdates] = useState([])
+
+    const wsRef = useRef(null)
 
     // Colors matching the exact UI palette
     const COLORS = {
@@ -24,7 +30,7 @@ const GameBoard = ({ playerData, onWin }) => {
 
     const cardColors = [COLORS.blue, COLORS.green, COLORS.red, COLORS.yellow]
 
-    // Initialize game grid and load player data
+    // Initialize game grid, load player data, and setup WebSocket
     useEffect(() => {
         const initializeGame = async () => {
             try {
@@ -35,10 +41,16 @@ const GameBoard = ({ playerData, onWin }) => {
                 const shuffled = utils.shuffleArray(tasks).slice(0, 36)
                 setBingoGrid(shuffled)
 
-                // Load player's completed tasks
+                // Load player's board state
                 if (playerData?.id) {
-                    const completedTaskIndices = await api.getPlayerBoard(playerData.id)
-                    setCompletedTasks(new Set(completedTaskIndices))
+                    const boardState = await api.getPlayerBoard(playerData.id)
+                    setCompletedTasks(new Set(boardState.completedTasks || []))
+                    setPlayerScore(boardState.score || 0)
+                    setBingos(boardState.bingos || [])
+                    setGameTimer(boardState.elapsedTime || 0)
+
+                    // Setup WebSocket for real-time updates
+                    setupWebSocket()
                 }
             } catch (error) {
                 console.error('Failed to initialize game:', error)
@@ -48,27 +60,85 @@ const GameBoard = ({ playerData, onWin }) => {
         }
 
         initializeGame()
+
+        // Cleanup WebSocket on unmount
+        return () => {
+            if (wsRef.current) {
+                wsRef.current.disconnect()
+            }
+        }
     }, [playerData])
 
-    // Timer countdown
+    // Setup WebSocket connection for real-time updates
+    const setupWebSocket = () => {
+        if (!playerData?.id) return
+
+        wsRef.current = new GameWebSocket(playerData.id)
+
+        // Handle real-time board updates
+        wsRef.current.on('board_update', (data) => {
+            setCompletedTasks(new Set(data.completedTasks || []))
+            setPlayerScore(data.score || 0)
+            setBingos(data.bingos || [])
+        })
+
+        // Handle real-time leaderboard updates
+        wsRef.current.on('leaderboard_update', (data) => {
+            setRealtimeUpdates(prev => [...prev, {
+                type: 'leaderboard',
+                message: `${data.playerName} scored ${data.score} points!`,
+                timestamp: Date.now()
+            }])
+        })
+
+        // Handle bingo achievements
+        wsRef.current.on('bingo_achieved', (data) => {
+            if (data.playerId === playerData.id) {
+                setBingos(prev => [...prev, data.bingo])
+                setRealtimeUpdates(prev => [...prev, {
+                    type: 'bingo',
+                    message: `You got a ${data.bingo.type}! +${data.scoreGained} points`,
+                    timestamp: Date.now()
+                }])
+            } else {
+                setRealtimeUpdates(prev => [...prev, {
+                    type: 'other_bingo',
+                    message: `${data.playerName} got a ${data.bingo.type}!`,
+                    timestamp: Date.now()
+                }])
+            }
+        })
+
+        // Handle full house completions
+        wsRef.current.on('full_house_completed', (data) => {
+            if (data.playerId === playerData.id) {
+                setIsGameActive(false)
+                onWin('fullhouse')
+            } else {
+                setRealtimeUpdates(prev => [...prev, {
+                    type: 'full_house',
+                    message: `${data.playerName} completed Full House! Final score: ${data.finalScore}`,
+                    timestamp: Date.now()
+                }])
+            }
+        })
+
+        wsRef.current.connect()
+    }
+
+    // Forward counting timer
     useEffect(() => {
+        if (!isGameActive) return
+
         const timer = setInterval(() => {
-            setGameTimer(prev => {
-                if (prev <= 1) {
-                    clearInterval(timer)
-                    return 0
-                }
-                return prev - 1
-            })
+            setGameTimer(prev => prev + 1)
         }, 1000)
 
         return () => clearInterval(timer)
-    }, [])
+    }, [isGameActive])
 
     const formatTime = (seconds) => {
-        const mins = Math.floor(seconds / 60)
-        const secs = seconds % 60
-        return `${mins}:${secs.toString().padStart(2, '0')}`
+        return utils.formatTime(seconds)
     }
 
     const handleTaskClick = (index) => {
@@ -79,17 +149,42 @@ const GameBoard = ({ playerData, onWin }) => {
     const handleSaveTask = async (index) => {
         if (tagInput.trim() && playerData?.id) {
             try {
-                // Mark task via API
-                await api.markTask(playerData.id, index, tagInput.trim())
+                // Validate tag first
+                const validation = await api.validateTag(playerData.id, tagInput.trim())
+                if (!validation.valid) {
+                    alert('This tag has already been used by you or is invalid. Please use a different tag.')
+                    return
+                }
 
-                // Update local state
+                // Mark task via API
+                const result = await api.markTask(playerData.id, index, tagInput.trim())
+
+                // Update local state with backend response
                 const newCompletedTasks = new Set([...completedTasks, index])
                 setCompletedTasks(newCompletedTasks)
+                setPlayerScore(result.score || playerScore + 5)
+
+                // Handle new bingos
+                if (result.newBingos && result.newBingos.length > 0) {
+                    setBingos(prev => [...prev, ...result.newBingos])
+                    result.newBingos.forEach(bingo => {
+                        setRealtimeUpdates(prev => [...prev, {
+                            type: 'bingo',
+                            message: `You got a ${bingo.type}! +${bingo.scoreBonus} points`,
+                            timestamp: Date.now()
+                        }])
+                    })
+                }
+
+                // Check for full house
+                if (newCompletedTasks.size === 36) {
+                    setIsGameActive(false)
+                    onWin('fullhouse')
+                }
+
                 setShowCardModal(null)
                 setTagInput('')
 
-                // Check for win conditions with updated state
-                checkWinConditions(newCompletedTasks)
             } catch (error) {
                 console.error('Failed to mark task:', error)
                 alert('Failed to save task. Please try again.')
@@ -101,36 +196,43 @@ const GameBoard = ({ playerData, onWin }) => {
         return cardColors[index % cardColors.length]
     }
 
-    const checkWinConditions = async (currentCompletedTasks = completedTasks) => {
-        const gridSize = 6
-        const completed = Array.from(currentCompletedTasks)
-
-        // Use utils function to check for wins
-        const winResult = utils.checkBingoWin(completed, gridSize)
-
-        if (winResult) {
-            try {
-                // Announce winner to backend
-                if (playerData?.id) {
-                    await api.announceWinner(playerData.id, winResult.type, winResult.indices)
-                }
-                onWin(winResult.type)
-            } catch (error) {
-                console.error('Failed to announce winner:', error)
-                // Still trigger win locally even if API fails
-                onWin(winResult.type)
-            }
-        }
+    const isTaskInBingo = (index) => {
+        return bingos.some(bingo => bingo.indices.includes(index))
     }
 
     return (
         <div className="min-h-screen relative" style={{ backgroundColor: COLORS.darkNavy }}>
-            <TopBar playerData={playerData} />
+            <TopBar
+                playerData={playerData}
+                showLeaderboard={true}
+                onShowLeaderboard={onShowLeaderboard}
+            />
 
-            {/* Header with Timer */}
-            <div className="text-center py-8 pt-20">
-                <div className="text-white text-6xl font-light">{formatTime(gameTimer)}</div>
+            {/* Header with Timer and Score */}
+            <div className="text-center py-6 pt-20">
+                <div className="text-white text-5xl font-light mb-2">{formatTime(gameTimer)}</div>
+                <div className="text-white text-xl mb-2">Score: {playerScore}</div>
+                <div className="text-white text-sm">
+                    Bingos: {bingos.length} | Tasks: {completedTasks.size}/36
+                </div>
             </div>
+
+            {/* Real-time Updates */}
+            {realtimeUpdates.length > 0 && (
+                <div className="fixed top-20 right-4 z-50 max-w-xs space-y-2">
+                    {realtimeUpdates.slice(-3).map((update, idx) => (
+                        <div
+                            key={idx}
+                            className={`p-3 rounded-lg text-sm animate-pulse ${update.type === 'bingo' ? 'bg-green-600' :
+                                    update.type === 'full_house' ? 'bg-yellow-600' :
+                                        'bg-blue-600'
+                                } text-white`}
+                        >
+                            {update.message}
+                        </div>
+                    ))}
+                </div>
+            )}
 
             {loading ? (
                 <div className="flex justify-center items-center py-20">
@@ -145,7 +247,8 @@ const GameBoard = ({ playerData, onWin }) => {
                                 <div
                                     key={index}
                                     onClick={() => handleTaskClick(index)}
-                                    className="relative aspect-square w-12 h-12 cursor-pointer transition-all duration-200"
+                                    className={`relative aspect-square w-12 h-12 cursor-pointer transition-all duration-200 ${isTaskInBingo(index) ? 'ring-2 ring-yellow-400' : ''
+                                        }`}
                                     style={{
                                         backgroundColor: completedTasks.has(index)
                                             ? COLORS.secondaryDark
