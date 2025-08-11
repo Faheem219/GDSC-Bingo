@@ -155,7 +155,7 @@ const Leaderboard = ({ playerData, onBack }) => {
                                                             {isCurrentPlayer && <span className="ml-2 text-yellow-400">(You)</span>}
                                                         </div>
                                                         <div className="text-white text-sm opacity-75">
-                                                            {player.tag} • {player.completedTasks || 0}/36 tasks
+                                                            {player.completedTasks || 0}/36 tasks
                                                         </div>
                                                         <div className="text-white text-xs opacity-50">
                                                             {player.bingos || 0} bingos • {utils.formatTime(player.elapsedTime || 0)}
